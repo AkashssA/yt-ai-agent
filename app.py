@@ -9,22 +9,22 @@ from urllib.parse import urlparse, parse_qs
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Video Intel AI", page_icon="🤖", layout="wide")
 
-# Custom UI Styling for a Professional Dashboard
+# Custom UI Styling for a Dashboard Look
 st.markdown("""
     <style>
     .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #3e4150; color: white; }
     .main { background-color: #0e1117; }
-    .stButton>button { background-color: #ff4b4b; color: white; font-weight: bold; width: 100%; border-radius: 8px; }
+    .stButton>button { background-color: #ff4b4b; color: white; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- API CLIENTS ---
-# Securely loading keys from Streamlit Secrets
+# These are pulled from Streamlit Cloud "Advanced Settings > Secrets"
 try:
     GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
 except Exception:
-    st.error("API Keys missing! Add them to 'Advanced Settings > Secrets' in Streamlit Cloud.")
+    st.error("API Keys missing! Add them to Secrets in Streamlit Cloud.")
     st.stop()
 
 gemini_client = genai.Client(api_key=GEMINI_KEY)
@@ -40,14 +40,16 @@ def get_video_id(url):
 
 def fetch_transcript(v_id):
     try:
-        data = YouTubeTranscriptApi.get_transcript(v_id)
+        ytt_api = YouTubeTranscriptApi()
+        data = ytt_api.fetch(v_id).to_raw_data()
         return " ".join([i['text'] for i in data])
     except Exception as e:
         return f"Error: {str(e)}"
 
 def generate_ai_notes(transcript_text):
-    """Try Gemini first, fallback to Groq if Quota (429) is hit."""
-    safe_text = transcript_text[:9000] # Stay under free tier token limits
+    """Try Gemini, fallback to Groq if 429 occurs."""
+    # Chunking to stay under Token limits
+    safe_text = transcript_text[:9000]
     prompt = f"Summarize this YouTube transcript into professional notes with key takeaways: {safe_text}"
     
     try:
@@ -59,11 +61,10 @@ def generate_ai_notes(transcript_text):
         return response.text, "Gemini 2.0"
     
     except Exception as e:
-        # Check for Resource Exhausted (429)
         if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
             st.warning("🔄 Gemini Quota Hit. Switching to Groq Fallback...")
+            # 2. Fallback to Groq (Llama 3.3 70B)
             try:
-                # 2. Fallback to Groq (Llama 3.3 70B)
                 chat_completion = groq_client.chat.completions.create(
                     messages=[{"role": "user", "content": prompt}],
                     model="llama-3.3-70b-versatile",
@@ -76,12 +77,12 @@ def generate_ai_notes(transcript_text):
 
 # --- DASHBOARD UI ---
 
-st.title("📺 Video Intel: AI Analysis Agent")
-st.write("Professional insights from YouTube transcripts with automatic failover.")
+st.title("📺 Video Intel: Multi-Model AI Agent")
+st.write("Professional analysis with automatic failover protection.")
 
 url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
 
-if st.button("Analyze Content"):
+if st.button("Analyze Content", use_container_width=True):
     v_id = get_video_id(url)
     if v_id:
         col1, col2 = st.columns([1, 1.2], gap="large")
@@ -90,21 +91,21 @@ if st.button("Analyze Content"):
             st.video(url)
             
         with col2:
-            with st.spinner("🕵️ Fetching Transcript..."):
+            with st.spinner("🕵️ Fetching and Analyzing Transcript..."):
                 transcript = fetch_transcript(v_id)
                 
                 if "Error" not in transcript:
-                    # ML Feature: Sentiment Analysis
+                    # ML Feature: Sentiment
                     blob = TextBlob(transcript)
                     polarity = blob.sentiment.polarity
                     tone = "Positive" if polarity > 0.1 else "Negative" if polarity < -0.1 else "Neutral"
                     
-                    # Display ML Metrics
+                    # Display ML Dashboard
                     m1, m2 = st.columns(2)
                     m1.metric("Emotional Tone", tone)
                     m2.metric("Subjectivity", f"{blob.sentiment.subjectivity:.2f}")
                     
-                    # AI Note Generation
+                    # AI Generation with Fallback
                     final_notes, provider = generate_ai_notes(transcript)
                     
                     st.success(f"Generated via {provider}")
