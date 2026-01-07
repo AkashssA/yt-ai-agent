@@ -3,3 +3,4 @@ google-genai
 groq
 youtube-transcript-api
 textblob
+yt-dlp
